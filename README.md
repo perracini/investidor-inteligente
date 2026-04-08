@@ -1,5 +1,9 @@
 # Investidor Inteligente
 
+> **Projeto de portfolio** — arquitetura profissional com SOLID, testes, observabilidade,
+> resiliencia e documentacao OpenAPI. Desenvolvido para demonstrar dominio em integracao
+> Java + IA + APIs externas em cenario realista de investimentos.
+
 API de analise fundamentalista de acoes brasileiras com IA. Busca dados em tempo real
 na brapi.dev, envia para IA local (Ollama/Llama 3.2) analisar e emite pareceres de
 investimento com recomendacao (COMPRA / VENDA / MANTER).
