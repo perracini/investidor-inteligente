@@ -1,5 +1,7 @@
 # Investidor Inteligente
 
+[![CI](https://github.com/perracini/investidor-inteligente/actions/workflows/ci.yml/badge.svg)](https://github.com/perracini/investidor-inteligente/actions/workflows/ci.yml)
+
 > **Projeto de portfolio** — arquitetura profissional com SOLID, testes, observabilidade,
 > resiliencia e documentacao OpenAPI. Desenvolvido para demonstrar dominio em integracao
 > Java + IA + APIs externas em cenario realista de investimentos.
@@ -10,7 +12,58 @@ investimento com recomendacao (COMPRA / VENDA / MANTER).
 
 Tambem permite **comparar** multiplas acoes lado a lado com ranking de preferencia.
 
-**Sem Docker.** PostgreSQL sobe automaticamente com a aplicacao (embarcado).
+**Sem Docker por padrao.** PostgreSQL sobe automaticamente com a aplicacao
+(embarcado via `io.zonky.test:embedded-postgres`). Se preferir rodar containerizado,
+existe `Dockerfile` + `docker-compose.yml` — veja a secao [Docker (opcional)](#docker-opcional)
+mais abaixo.
+
+---
+
+## Demo
+
+### Swagger UI
+
+![Swagger UI](docs/screenshots/swagger.png)
+
+> _Para gerar: suba a aplicacao com `./mvnw spring-boot:run`, abra
+> `http://localhost:8084/swagger-ui.html` e capture a tela. Salve em
+> `docs/screenshots/swagger.png`._
+
+### Fluxo completo via curl
+
+```bash
+# 1) Cria analise da PETR4 (busca cotacao real + chama IA + persiste)
+curl -X POST http://localhost:8084/api/analises \
+  -H "Content-Type: application/json" \
+  -d '{"ticker": "PETR4"}'
+
+# Resposta:
+# {
+#   "id": 1,
+#   "ticker": "PETR4",
+#   "empresa": "Petroleo Brasileiro SA Pfd",
+#   "preco": 46.46,
+#   "variacao": -4.23,
+#   "dividendYield": 0.0,
+#   "pl": 5.44,
+#   "recomendacao": "COMPRA",
+#   "parecer": "O preco atual da PETR4 esta abaixo do P/L historico...",
+#   "criadoEm": "2026-04-08T16:29:25"
+# }
+
+# 2) Busca a analise persistida por ID
+curl http://localhost:8084/api/analises/1
+
+# 3) Lista historico filtrando por ticker (paginado)
+curl "http://localhost:8084/api/analises?ticker=PETR4&page=0&size=10"
+```
+
+![Demo GIF](docs/screenshots/demo.gif)
+
+> _Para gerar o GIF: use [ScreenToGif](https://www.screentogif.com/) (Windows) ou
+> similar, grave o ciclo POST -> GET acima e salve em `docs/screenshots/demo.gif`._
+
+---
 
 ## Stack
 
@@ -317,6 +370,79 @@ Executar:
 ./mvnw test -Dtest='*ServiceImplTest'                      # so unitarios
 ./mvnw test -Dtest='AnaliseFluxoCompletoIntegrationTest'   # so integracao
 ```
+
+---
+
+## CI/CD (GitHub Actions)
+
+O projeto tem um pipeline minimalista em [.github/workflows/ci.yml](.github/workflows/ci.yml)
+que roda a cada push e pull request contra `master`:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+      - run: ./mvnw --batch-mode --no-transfer-progress test
+```
+
+**O que esse pipeline garante:**
+
+1. **Build reprodutivel** — JDK 17 Temurin (mesma versao que o `pom.xml` exige).
+2. **Todos os testes verdes** — unitarios + integracao (incluindo o de Postgres embutido).
+3. **Cache de dependencias** — `~/.m2/repository` reaproveitado entre runs para builds rapidos.
+4. **Artefatos em caso de falha** — `target/surefire-reports/` publicados como artifact por 7 dias para debug.
+
+O badge no topo do README reflete o estado da ultima run na `master`. PR que
+quebrar o pipeline fica bloqueado ate corrigir.
+
+**Por que so `test` e nao deploy?**
+Este e um projeto de portfolio — nao ha ambiente de staging/producao para
+publicar. O pipeline demonstra o raciocinio correto (fail-fast em PR, build
+reprodutivel, artefatos em caso de falha), que e o que um revisor tecnico
+espera ver. Para adicionar deploy, bastaria um job `deploy` dependente de
+`test` com `needs: [test]`.
+
+---
+
+## Docker (opcional)
+
+Embora o projeto rode sem Docker por padrao, existem um `Dockerfile` e um
+`docker-compose.yml` opcionais para quem preferir isolamento via container:
+
+```bash
+# Build e run via compose (app + Postgres embutido no mesmo container)
+docker compose up app
+
+# Ou direto via docker
+docker build -t investidor-inteligente .
+docker run -p 8084:8084 investidor-inteligente
+```
+
+**Detalhes de implementacao:**
+
+- **Multi-stage build** — stage 1 (`maven:3.9-eclipse-temurin-17`) constroi o jar,
+  stage 2 (`eclipse-temurin:17-jre-alpine`) contem apenas o runtime. Imagem final
+  fica em ~200MB em vez de ~700MB.
+- **Cache de dependencias** — `pom.xml` copiado e `dependency:go-offline` rodado
+  antes do codigo fonte, para que mudancas em `src/` nao invalidem o cache do Maven.
+- **Usuario nao-root** — runtime roda como user `app` (nao-root) por seguranca.
+- **Portas expostas** — 8084 (HTTP/API/Swagger).
+
+**Por que embarcado e nao servicos separados por default?**
+A escolha foi **deliberada**: o projeto e auto-contido para fins de portfolio e
+estudo. Quem avalia nao precisa configurar Postgres nem infraestrutura — um
+`./mvnw spring-boot:run` e suficiente. O `docker-compose.yml` tem a "Opcao B"
+comentada mostrando como desacoplar em servicos separados (Postgres em container
+proprio) para producao real. A intencao e deixar claro que a escolha foi
+consciente e que a aplicacao pode ser containerizada "de verdade" com mudancas
+minimas.
 
 ---
 

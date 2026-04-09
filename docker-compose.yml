@@ -1,0 +1,63 @@
+# -----------------------------------------------------------------------------
+# docker-compose.yml — investidor-inteligente
+#
+# Este compose e OPCIONAL e serve principalmente como referencia.
+#
+# O projeto foi desenhado para rodar "sem Docker" — PostgreSQL sobe embutido no
+# proprio processo Spring (vide DatabaseConfig.java). Isso e deliberado: torna
+# o projeto auto-contido para fins de portfolio/estudo, sem exigir que o
+# avaliador configure infraestrutura.
+#
+# Se voce quiser rodar containerizado mesmo assim, existem duas opcoes:
+#
+# OPCAO A (padrao aqui) — app containerizada + embedded:
+#   docker compose up app
+#   Mesma experiencia do ./mvnw spring-boot:run, so que dentro de um container.
+#
+# OPCAO B — servicos desacoplados (simulando producao):
+#   Descomente os servicos postgres/ollama abaixo, remova DatabaseConfig do
+#   projeto e aponte o application.yml para os hosts dos containers. E o
+#   caminho que voce seguiria em producao real.
+#
+# A intencao aqui e mostrar que a escolha de embedded foi consciente e que a
+# aplicacao poderia ser containerizada "de verdade" com mudancas minimas.
+# -----------------------------------------------------------------------------
+
+services:
+  app:
+    build: .
+    image: investidor-inteligente:latest
+    container_name: investidor-inteligente
+    ports:
+      - "8084:8084"  # HTTP (API + Swagger)
+    environment:
+      # Em producao real, apontaria para postgres e ollama containers
+      # SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/investidor
+      # SPRING_AI_OLLAMA_BASE_URL: http://ollama:11434
+      JAVA_OPTS: "-Xms384m -Xmx768m"
+
+  # -----------------------------------------------------------------------------
+  # Servicos abaixo comentados — referencia para "Opcao B" descrita no topo.
+  # -----------------------------------------------------------------------------
+  #
+  # postgres:
+  #   image: postgres:16-alpine
+  #   environment:
+  #     POSTGRES_DB: investidor
+  #     POSTGRES_USER: investidor
+  #     POSTGRES_PASSWORD: investidor
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - postgres-data:/var/lib/postgresql/data
+  #
+  # ollama:
+  #   image: ollama/ollama:latest
+  #   ports:
+  #     - "11434:11434"
+  #   volumes:
+  #     - ollama-data:/root/.ollama
+  #
+# volumes:
+#   postgres-data:
+#   ollama-data:
