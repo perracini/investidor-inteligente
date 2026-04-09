@@ -220,20 +220,102 @@ O `GlobalExceptionHandler` retorna sempre o mesmo formato (`ErrorResponse`):
 
 ---
 
-## Conceito: Testes
+## Conceito: Contextos de transacao
+
+O metodo `analisar()` do `AnaliseServiceImpl` **nao e `@Transactional` no escopo do
+metodo inteiro**. A chamada ao Ollama leva 10-20s e manter uma transacao aberta
+durante I/O externo segura connection do pool e mata a escalabilidade sob carga
+(10 analises paralelas esgotariam o HikariCP default).
+
+A solucao: como o unico acesso ao banco e o `repository.save()` ao final,
+deixamos o `JpaRepository.save()` abrir sua propria transacao curta (o Spring Data
+ja anota `SimpleJpaRepository` como `@Transactional`). Resultado: a TX dura
+milissegundos em vez de dezenas de segundos, e a IA roda fora de qualquer contexto
+transacional.
 
 ```
-Tests run: 11, Failures: 0, Errors: 0
+[busca externa brapi.dev]   sem TX
+[chamada Ollama 10-20s]     sem TX — NAO segura connection do pool
+[repository.save()]         TX curta do Spring Data (commit implicito)
 ```
+
+**Se o metodo precisar de mais de uma operacao de banco** (ex.: salvar historico +
+atualizar agregados), a forma correta e usar `TransactionTemplate` para agrupar
+*apenas* os acessos ao banco em uma TX curta, mantendo a chamada a IA fora da
+transacao. O padrao esta documentado no `suporte-inteligente` (que tem o cenario
+mais complexo de dois contextos transacionais separados por I/O).
+
+**Metodos de leitura** (`buscarPorId`, `listarPorTicker`, `listarTodas`) sao
+marcados como `@Transactional(readOnly = true)` para otimizar sessoes de leitura
+do Hibernate.
+
+---
+
+## Conceito: Testes unitarios + integracao
+
+O projeto tem **duas camadas de teste** com propositos distintos e complementares:
+
+```
+Tests run: 15, Failures: 0, Errors: 0
+```
+
+### Testes unitarios (11 testes — `service/impl/*Test.java`)
+
+Isolam cada classe de seus colaboradores via Mockito. Rapidos (milissegundos),
+nao sobem Spring, nao tocam Postgres.
 
 | Classe de teste | O que valida |
 |---|---|
 | `AnaliseServiceImplTest` (7) | Analise com sucesso, extracao de COMPRA/VENDA/MANTER/INDEFINIDO, cotacao indisponivel, busca por ID |
 | `ComparacaoServiceImplTest` (3) | Comparacao de 2 e 3 acoes, ticker invalido na lista |
 
+### Teste de integracao (4 testes — `integration/AnaliseFluxoCompletoIntegrationTest`)
+
+Sobe o contexto Spring completo (`@SpringBootTest` + `MockMvc`) com Postgres
+embutido. Mocka apenas a `CotacaoExternaGateway` (brapi.dev) e o `OllamaGateway`
+via `@MockitoBean` — nao depende de rede nem do Ollama local no CI. Valida o
+fluxo real ponta a ponta:
+
+```
+POST /api/analises -> HTTP 200
+   -> AnaliseService busca cotacao (mock)
+   -> chama Ollama (mock)
+   -> persiste no Postgres embutido
+   -> retorna parecer
+GET /api/analises/{id} -> HTTP 200 com a analise persistida
+GET /api/analises?ticker=PETR4 -> lista paginada com a analise recem-criada
+```
+
+| Cenario | O que valida |
+|---|---|
+| `deveAnalisarEConsultarAcaoComSucesso` | Fluxo completo POST -> persistencia -> GET por id -> GET paginado com filtro |
+| `deveRetornar422QuandoCotacaoIndisponivel` | Excecao de negocio mapeada para 422 pelo `GlobalExceptionHandler` |
+| `deveRetornar400QuandoTickerInvalido` | Bean Validation do regex `^[A-Za-z]{4}\d{1,2}$` |
+| `deveRetornar404QuandoAnaliseInexistente` | `AnaliseNaoEncontradaException` -> 404 |
+
+### Unitarios vs. integracao — comparativo
+
+| Criterio | Unitario | Integracao |
+|---|---|---|
+| **Velocidade** | ~50ms por teste | ~7s por teste (setup do contexto) |
+| **Sobe Spring?** | Nao | Sim (`@SpringBootTest`) |
+| **Toca Postgres?** | Nao (repository mockado) | Sim (embedded) |
+| **Mocka IA / brapi.dev?** | Sim (gateways Mockito) | Sim (`@MockitoBean`) |
+| **O que valida bem** | Logica de extracao, branching, exceptions, edge cases | Serializacao JSON, Bean Validation, handlers globais, paginacao real, queries JPA |
+| **O que *nao* valida** | Integracao entre camadas, wiring Spring, queries JPA | Casos extremos unitarios (custaria caro rodar um contexto por caso) |
+| **Quando quebra** | Mudou logica da classe | Mudou contrato entre camadas ou configuracao Spring |
+
+As duas camadas se complementam: unitarios cobrem logica interna com velocidade,
+integracao cobre o wiring e os contratos entre componentes reais. **Nenhuma das duas
+sozinha e suficiente** — unitarios podem passar enquanto o sistema nao sobe (ex.:
+bean nao encontrado, query JPA invalida), e integracao e caro demais para cobrir
+todos os ramos de um metodo.
+
 Executar:
 ```
-./mvnw test
+./mvnw test                                                # tudo
+./mvnw test -Dtest='*ServiceImplTest'                      # so unitarios
+./mvnw test -Dtest='AnaliseFluxoCompletoIntegrationTest'   # so integracao
 ```
 
 ---

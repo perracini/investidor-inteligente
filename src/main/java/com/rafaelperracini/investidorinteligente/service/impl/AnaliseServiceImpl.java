@@ -48,8 +48,22 @@ public class AnaliseServiceImpl implements AnaliseService {
         this.repository = repository;
     }
 
+    /**
+     * Analisa uma acao. NAO e {@code @Transactional} de proposito:
+     *
+     * <p>A chamada ao Ollama pode demorar 10-20s e manter uma transacao aberta durante
+     * I/O externo segura connection do pool e mata a escalabilidade sob carga. Como o
+     * unico acesso ao banco e o {@code repository.save()} no final, deixamos o
+     * {@code JpaRepository.save()} abrir sua propria transacao curta (o Spring Data ja
+     * anota {@code SimpleJpaRepository} como {@code @Transactional}). Resultado: a TX
+     * dura milissegundos em vez de dezenas de segundos.
+     *
+     * <p>Se no futuro o metodo precisar de mais de uma operacao de banco (ex.: salvar
+     * historico + atualizar agregados), a forma correta e usar {@link org.springframework.transaction.support.TransactionTemplate}
+     * para agrupar apenas os acessos ao banco em uma TX curta, mantendo a chamada a IA
+     * fora da transacao.
+     */
     @Override
-    @Transactional
     public AnaliseResponse analisar(String ticker) {
         log.info("Iniciando analise fundamentalista de {}", ticker.toUpperCase());
 
@@ -75,6 +89,7 @@ public class AnaliseServiceImpl implements AnaliseService {
                 cotacao.variacao(), cotacao.dividendYield(), cotacao.pl(),
                 recomendacao, parecer, LocalDateTime.now());
 
+        // save() abre sua propria TX curta via Spring Data — fora do I/O da IA.
         entity = repository.save(entity);
         log.info("Analise de {} concluida: {}", ticker.toUpperCase(), recomendacao);
 
@@ -82,6 +97,7 @@ public class AnaliseServiceImpl implements AnaliseService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public AnaliseResponse buscarPorId(Long id) {
         AnaliseEntity entity = repository.findById(id)
                 .orElseThrow(() -> new AnaliseNaoEncontradaException(id));
@@ -89,11 +105,13 @@ public class AnaliseServiceImpl implements AnaliseService {
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Page<AnaliseResponse> listarPorTicker(String ticker, Pageable pageable) {
         return repository.findByTickerIgnoreCase(ticker, pageable).map(this::toResponse);
     }
 
     @Override
+    @Transactional(readOnly = true)
     public Page<AnaliseResponse> listarTodas(Pageable pageable) {
         return repository.findAll(pageable).map(this::toResponse);
     }
