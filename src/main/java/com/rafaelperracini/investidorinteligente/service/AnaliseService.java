@@ -10,7 +10,5 @@ public interface AnaliseService {
 
     AnaliseResponse buscarPorId(Long id);
 
-    Page<AnaliseResponse> listarPorTicker(String ticker, Pageable pageable);
-
-    Page<AnaliseResponse> listarTodas(Pageable pageable);
+    Page<AnaliseResponse> listar(String ticker, Pageable pageable);
 }

@@ -14,6 +14,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -106,14 +107,17 @@ public class AnaliseServiceImpl implements AnaliseService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<AnaliseResponse> listarPorTicker(String ticker, Pageable pageable) {
-        return repository.findByTickerIgnoreCase(ticker, pageable).map(this::toResponse);
-    }
+    public Page<AnaliseResponse> listar(String ticker, Pageable pageable) {
 
-    @Override
-    @Transactional(readOnly = true)
-    public Page<AnaliseResponse> listarTodas(Pageable pageable) {
-        return repository.findAll(pageable).map(this::toResponse);
+        Specification<AnaliseEntity> spec = (root, query, cb) -> cb.conjunction();
+
+        if (ticker != null) {
+            spec = spec.and((root, query, cb) ->
+                    cb.equal(cb.upper(root.get("ticker")), ticker.toUpperCase()));
+        }
+
+        return repository.findAll(spec, pageable)
+                         .map(this::toResponse);
     }
 
     private TipoRecomendacao extrairRecomendacao(String resposta) {

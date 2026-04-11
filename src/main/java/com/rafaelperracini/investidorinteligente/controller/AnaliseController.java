@@ -60,9 +60,6 @@ public class AnaliseController {
             @Parameter(description = "Filtro por ticker (ex: PETR4)")
             @RequestParam(required = false) String ticker,
             @PageableDefault(size = 20, sort = "criadoEm") Pageable pageable) {
-        if (ticker != null) {
-            return analiseService.listarPorTicker(ticker, pageable);
-        }
-        return analiseService.listarTodas(pageable);
+        return analiseService.listar(ticker, pageable);
     }
 }
